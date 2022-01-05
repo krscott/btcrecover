@@ -1,66 +1,117 @@
 #!/usr/bin/env python3
 
+import re
 import itertools
 from typing import Optional, Tuple
-import compatibility_check # type: ignore
+import compatibility_check  # type: ignore
 
 from btcrecover import btcrseed
-import sys, multiprocessing
+import sys
+import multiprocessing
 
-def main(words: list[list[str]]) -> Tuple[Optional[str], int]:
+
+def main(words: list[list[str]], addr: str, excluded_filename: Optional[str]) -> Tuple[Optional[str], int]:
+    excluded_sentences: set[str] = (
+        get_excluded_inputs(
+            excluded_filename) if excluded_filename else set([])
+    )
+
     total_iterations = 1
     for a in words:
         total_iterations *= len(a)
 
-    base_argv = "--dsw --wallet-type ethereum --addrs 0x82Bd10047dBE588508d5d976d59693E4Ab4ADaC5 --addr-limit 1 --big-typos 1 --mnemonic".split(" ")
+    big_typos = max(1, 12 - len(words))
+
+    base_argv = [
+        "--dsw",
+        "--wallet-type", "ethereum",
+        "--addrs", f"{addr}",
+        "--addr-limit", "1",
+        "--passphrase-arg", "",
+        "--big-typos", f"{big_typos}",
+        "--mnemonic"
+    ]
 
     for i, partial_mnemonic in enumerate(itertools.product(*words)):
         partial_mnemonic = " ".join(partial_mnemonic)
+
+        if partial_mnemonic in excluded_sentences:
+            continue
 
         print("")
         print(f"[{i}/{total_iterations}] {partial_mnemonic}")
 
         argv = base_argv + [partial_mnemonic]
-        mnemonic_sentence, path_coin = btcrseed.main(argv) # type: ignore
+        mnemonic_sentence, path_coin = btcrseed.main(argv)  # type: ignore
 
         # Wait for any remaining child processes to exit cleanly (to avoid error messages from gc)
         for process in multiprocessing.active_children():
             process.join(1.0)
 
         if mnemonic_sentence:
-            return mnemonic_sentence, path_coin # type: ignore
+            return mnemonic_sentence, path_coin  # type: ignore
+
+        # Input failed, add to excluded
+        if excluded_filename:
+            add_excluded_input(excluded_filename, partial_mnemonic)
 
     return None, 0
 
+
+def get_excluded_inputs(filename: str) -> set[str]:
+    try:
+        with open(filename) as f:
+            return set([line.strip() for line in f.readlines()])
+    except FileNotFoundError:
+        return set([])
+
+
+def add_excluded_input(filename: str, sentence: str):
+    with open(filename, "a") as f:
+        _ = f.write(f"{sentence}\n")
+
+
+def get_addr_words_from_lines(lines: list[str]) -> Tuple[str, list[list[str]]]:
+    lines = [line.strip() for line in lines]
+    lines = [line for line in lines if len(line) > 0]
+
+    addr = lines.pop(0)
+    words = [
+        [word.strip().lower() for word in re.split(r'[,\s]+', line)]
+        for line in lines
+    ]
+
+    return addr, words
+
+
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    _ = parser.add_argument("file", type=argparse.FileType("r"))
+    args = parser.parse_args()
+
+    addr, words = get_addr_words_from_lines(args.file.readlines())
+
     print()
     print("Starting", btcrseed.full_version())
 
     btcrseed.register_autodetecting_wallets()
 
-    words = [
-        ["apology", "runway", "argue"],
-        ["cheese"],
-        ["famous", "empty"],
-        ["corn"],
-        ["giggle"],
-        ["frame"],
-        ["pause"],
-        ["abuse"],
-        ["husband", "expose"],
-        ["elegant"],
-        ["pride"],
-        # ["shrimp"],
-    ]
+    print(f"Searching for {addr} from {len(words)} word lists:\n{words}")
 
-    mnemonic_sentence, path_coin = main(words)
+    mnemonic_sentence, path_coin = main(words, addr, f".exclude-{addr}.txt")
 
     if mnemonic_sentence:
         print(f"Found match: {mnemonic_sentence}")
 
+        with open(f".match-{addr}.txt", "w") as f:
+            _ = f.write(mnemonic_sentence)
+
         btcrseed.init_gui()
         if btcrseed.tk_root:
-            btcrseed.show_mnemonic_gui(mnemonic_sentence, path_coin) # type: ignore
+            btcrseed.show_mnemonic_gui(  # type: ignore
+                mnemonic_sentence, path_coin)
 
         sys.exit(0)
 
