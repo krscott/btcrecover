@@ -32,14 +32,20 @@ def main(words: list[list[str]], addr: str, excluded_filename: Optional[str]) ->
         "--mnemonic"
     ]
 
-    for i, partial_mnemonic in enumerate(itertools.product(*words)):
-        partial_mnemonic = " ".join(partial_mnemonic)
+    for i, partial_mnemonic_list in enumerate(itertools.product(*words)):
+        partial_mnemonic = " ".join(partial_mnemonic_list)
 
         if partial_mnemonic in excluded_sentences:
             continue
 
+
+        # Temporary check for also matching 10/12 words if list is 11 words long
+        if " ".join(partial_mnemonic_list[:-1]) in excluded_sentences:
+            continue
+
+
         print("")
-        print(f"[{i}/{total_iterations}] {partial_mnemonic}")
+        print(f"[{i+1}/{total_iterations}] {partial_mnemonic}")
 
         argv = base_argv + [partial_mnemonic]
         mnemonic_sentence, path_coin = btcrseed.main(argv)  # type: ignore
