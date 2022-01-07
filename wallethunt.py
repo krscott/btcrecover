@@ -10,7 +10,12 @@ import sys
 import multiprocessing
 
 
-def main(words: list[list[str]], addr: str, excluded_filename: Optional[str]) -> Tuple[Optional[str], int]:
+def main(
+    words: list[list[str]],
+    addr: str,
+    excluded_filename: Optional[str],
+    big_typos: Optional[int] = None
+) -> Tuple[Optional[str], int]:
     excluded_sentences: set[str] = (
         get_excluded_inputs(
             excluded_filename) if excluded_filename else set([])
@@ -20,7 +25,7 @@ def main(words: list[list[str]], addr: str, excluded_filename: Optional[str]) ->
     for a in words:
         total_iterations *= len(a)
 
-    big_typos = max(1, 12 - len(words))
+    big_typos = max(1, 12 - len(words)) if big_typos is None else big_typos
 
     base_argv = [
         "--dsw",
@@ -35,17 +40,19 @@ def main(words: list[list[str]], addr: str, excluded_filename: Optional[str]) ->
     for i, partial_mnemonic_list in enumerate(itertools.product(*words)):
         partial_mnemonic = " ".join(partial_mnemonic_list)
 
-        if partial_mnemonic in excluded_sentences:
-            continue
-
-
-        # Temporary check for also matching 10/12 words if list is 11 words long
-        if " ".join(partial_mnemonic_list[:-1]) in excluded_sentences:
-            continue
-
-
         print("")
         print(f"[{i+1}/{total_iterations}] {partial_mnemonic}")
+
+        if partial_mnemonic in excluded_sentences:
+            print(f"Matches exclusion: {partial_mnemonic}")
+            continue
+
+        # Check for also matching partial phrases with fewer words
+        for i in (-1, -2):
+            partial_mnemonic_less = " ".join(partial_mnemonic_list[:i])
+            if partial_mnemonic_less in excluded_sentences:
+                print(f"Matches exclusion: {partial_mnemonic_less}")
+                continue
 
         argv = base_argv + [partial_mnemonic]
         mnemonic_sentence, path_coin = btcrseed.main(argv)  # type: ignore
@@ -94,7 +101,11 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    _ = parser.add_argument("file", type=argparse.FileType("r"))
+    _ = parser.add_argument(
+        "file", type=argparse.FileType("r"), help="Input file")
+    _ = parser.add_argument(
+        "--big-typos", "-t", metavar="N",
+        type=int, help="Number of words to randomize")
     args = parser.parse_args()
 
     addr, words = get_addr_words_from_lines(args.file.readlines())
@@ -106,7 +117,8 @@ if __name__ == "__main__":
 
     print(f"Searching for {addr} from {len(words)} word lists:\n{words}")
 
-    mnemonic_sentence, path_coin = main(words, addr, f".exclude-{addr}.txt")
+    mnemonic_sentence, path_coin = main(
+        words, addr, f".exclude-{addr}.txt", big_typos=args.big_typos)
 
     if mnemonic_sentence:
         print(f"Found match: {mnemonic_sentence}")
